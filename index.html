@@ -317,8 +317,11 @@
         let particles = [];
         let inventory = [];
 
+        let weaponMesh;
+
         let currentWeapon = {
             name: "标准手枪",
+            type: "laser",
             damage: 20,
             fireRate: 400,
             lastShot: 0,
@@ -400,6 +403,10 @@
             let pitchObject = new THREE.Object3D();
             pitchObject.add(camera);
 
+            weaponMesh = new THREE.Group();
+            weaponMesh.position.set(0.3, -0.3, -0.8);
+            pitchObject.add(weaponMesh);
+
             let yawObject = new THREE.Object3D();
             yawObject.position.y = 2;
             yawObject.add(pitchObject);
@@ -414,6 +421,46 @@
             });
 
             controls = { yawObject, pitchObject };
+            updateWeaponModel();
+        }
+
+        function updateWeaponModel() {
+            if(!weaponMesh) return;
+            while(weaponMesh.children.length > 0) {
+                weaponMesh.remove(weaponMesh.children[0]);
+            }
+
+            const mat = new THREE.MeshLambertMaterial({color: currentWeapon.color});
+
+            if (currentWeapon.type === 'nuke') {
+                const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5), mat);
+                b1.rotation.x = Math.PI/2;
+                const b2 = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshLambertMaterial({color: 0xff0000}));
+                b2.position.z = -0.3;
+                weaponMesh.add(b1); weaponMesh.add(b2);
+            } else if (currentWeapon.type === 'water') {
+                const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.1, 0.6), mat);
+                b1.rotation.x = Math.PI/2;
+                const tank = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.2), new THREE.MeshLambertMaterial({color: 0x0000ff}));
+                tank.position.set(0, 0.1, 0.1);
+                weaponMesh.add(b1); weaponMesh.add(tank);
+            } else if (currentWeapon.type === 'gas') {
+                const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.4), mat);
+                const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.02, 0.2), new THREE.MeshLambertMaterial({color: 0x00ff00}));
+                nozzle.rotation.x = Math.PI/2;
+                nozzle.position.z = -0.25;
+                weaponMesh.add(b1); weaponMesh.add(nozzle);
+            } else if (currentWeapon.type === 'pierce') {
+                const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.7), mat);
+                const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3), new THREE.MeshLambertMaterial({color: 0x111111}));
+                scope.rotation.x = Math.PI/2;
+                scope.position.set(0, 0.1, 0);
+                weaponMesh.add(b1); weaponMesh.add(scope);
+            } else {
+                // laser/default
+                const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.4), mat);
+                weaponMesh.add(b1);
+            }
         }
 
         function onPointerLockChange() {
@@ -658,7 +705,13 @@
             for(let i=particles.length-1; i>=0; i--) {
                 const p = particles[i];
                 p.position.add(p.vel.clone().multiplyScalar(delta));
-                p.vel.y -= 9.8 * delta;
+                p.vel.y -= 9.8 * p.gravityScale * delta;
+
+                // For gas clouds, make them float up and expand
+                if(p.gravityScale < 0) {
+                    p.scale.multiplyScalar(1 + delta);
+                }
+
                 p.life -= delta * 2;
                 p.material.opacity = p.life;
                 if(p.life <= 0) {
@@ -699,6 +752,16 @@
             }
         }
 
+        function findEnemyFromHit(object) {
+            let curr = object;
+            while(curr) {
+                const enemy = enemies.find(e => e.mesh === curr);
+                if(enemy) return enemy;
+                curr = curr.parent;
+            }
+            return null;
+        }
+
         function shoot() {
             playSound('shoot');
             const direction = new THREE.Vector3();
@@ -708,39 +771,90 @@
             direction.z += (Math.random()-0.5)*currentWeapon.spread;
             direction.normalize();
 
-            raycaster.set(camera.position, direction);
+            const origin = new THREE.Vector3();
+            camera.getWorldPosition(origin);
+
+            raycaster.set(origin, direction);
             const enemyMeshes = enemies.map(e => e.mesh);
-            const intersects = raycaster.intersectObjects(enemyMeshes);
+            const intersects = raycaster.intersectObjects(enemyMeshes, true);
+
+            let hitPoint = origin.clone().add(direction.clone().multiplyScalar(50));
 
             if (intersects.length > 0) {
-                const enemy = enemies.find(e => e.mesh === intersects[0].object);
+                const enemy = findEnemyFromHit(intersects[0].object);
+                hitPoint = intersects[0].point;
                 if (enemy) {
                     damageEnemy(enemy, currentWeapon.damage);
-                    createParticles(intersects[0].point, 0xff0000, 5);
+                    createParticles(hitPoint, 0xff0000, 5, 1.0);
                 }
             } else {
-                const wallHits = raycaster.intersectObjects(obstacles);
-                if(wallHits.length > 0) createParticles(wallHits[0].point, 0xffff00, 3);
+                const wallHits = raycaster.intersectObjects(obstacles, true);
+                if(wallHits.length > 0) {
+                    hitPoint = wallHits[0].point;
+                    createParticles(hitPoint, 0xffff00, 3, 1.0);
+                }
             }
-            createLaserBeam(camera.position, direction);
+            createWeaponEffect(origin, direction, hitPoint);
+        }
+
+        function applyAoEDamage(center, radius, damage) {
+            enemies.forEach(enemy => {
+                if(enemy.mesh.position.distanceTo(center) <= radius) {
+                    damageEnemy(enemy, damage);
+                }
+            });
+        }
+
+        function createWeaponEffect(start, dir, hitPoint) {
+            if(currentWeapon.type === 'nuke') {
+                createParticles(hitPoint, 0xffaa00, 50, 0.2);
+                createParticles(hitPoint, 0xff0000, 30, 0.5);
+                applyAoEDamage(hitPoint, 15, currentWeapon.damage);
+            }
+            else if(currentWeapon.type === 'gas') {
+                // Spawn gas clouds along the path
+                const dist = start.distanceTo(hitPoint);
+                for(let i=0; i<dist; i+=2) {
+                    const p = start.clone().add(dir.clone().multiplyScalar(i));
+                    createParticles(p, currentWeapon.color, 2, -0.2);
+                }
+                applyAoEDamage(hitPoint, 8, currentWeapon.damage);
+            }
+            else if(currentWeapon.type === 'water') {
+                // Water splash
+                createParticles(hitPoint, currentWeapon.color, 20, 1.5);
+                // Apply small AoE push/damage
+                applyAoEDamage(hitPoint, 5, currentWeapon.damage);
+            }
+            else {
+                // Default piercing or laser line
+                const material = new THREE.LineBasicMaterial({ color: currentWeapon.color, linewidth: currentWeapon.type==='pierce'? 3 : 1 });
+                const points = [start, hitPoint];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geometry, material);
+                scene.add(line);
+                setTimeout(() => { scene.remove(line); }, 100);
+            }
         }
 
         function createLaserBeam(start, dir) {
-            const material = new THREE.LineBasicMaterial({ color: currentWeapon.color });
+            const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
             const points = [start, start.clone().add(dir.clone().multiplyScalar(50))];
             const geometry = new THREE.BufferGeometry().setFromPoints(points);
             const line = new THREE.Line(geometry, material);
             scene.add(line);
             setTimeout(() => { scene.remove(line); }, 100);
         }
-        function createParticles(pos, color, count) {
+
+        function createParticles(pos, color, count, gravityScale = 1.0) {
             for(let i=0; i<count; i++) {
                 const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-                const mat = new THREE.MeshBasicMaterial({ color: color });
+                const mat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 1.0 });
                 const p = new THREE.Mesh(geo, mat);
                 p.position.copy(pos);
                 p.vel = new THREE.Vector3((Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10);
                 p.life = 1.0;
+                p.gravityScale = gravityScale;
                 scene.add(p);
                 particles.push(p);
             }
@@ -844,7 +958,11 @@
                         const shotDir = dir.clone();
                         shotDir.x += (Math.random()-0.5)*0.3;
                         shotDir.y += (Math.random()-0.5)*0.3;
-                        createLaserBeam(enemy.mesh.position.clone().add(new THREE.Vector3(0,1.5,0)), shotDir);
+
+                        // Origin of the enemy attack
+                        const enemyShootOrigin = enemy.mesh.position.clone().add(new THREE.Vector3(0,1.5,0));
+                        createLaserBeam(enemyShootOrigin, shotDir);
+
                         if(Math.random() > 0.4) takeDamage(10);
                         enemy.lastShot = now;
                     }
@@ -858,8 +976,8 @@
             const dir = new THREE.Vector3().subVectors(enemy.mesh.position, controls.yawObject.position).normalize();
             enemy.mesh.position.add(dir.multiplyScalar(2));
             if (enemy.hp <= 0) {
-                createParticles(enemy.mesh.position, 0x111111, 20);
-                createParticles(enemy.mesh.position, 0xff0000, 10);
+                createParticles(enemy.mesh.position, 0x111111, 20, 1.0);
+                createParticles(enemy.mesh.position, 0xff0000, 10, 1.0);
                 scene.remove(enemy.mesh);
                 enemies = enemies.filter(e => e !== enemy);
                 player.score += 100;
@@ -1003,17 +1121,18 @@
             let damage = 15;
             let fireRate = 400;
             let color = 0xffffff;
+            let type = "laser";
 
             if (counts.wild === 3) {
-                weaponName = "核发射密码"; damage = 1000; fireRate = 2000; color = 0xff00ff;
+                weaponName = "核发射密码"; damage = 1000; fireRate = 2000; color = 0xff00ff; type = "nuke";
             } else if (counts.water >= 2) {
-                weaponName = "高压水枪"; damage = 8; fireRate = 100; color = 0x00BFFF;
+                weaponName = "高压水枪"; damage = 8; fireRate = 100; color = 0x00BFFF; type = "water";
             } else if (counts.nature >= 2) {
-                weaponName = "生化毒气喷射器"; damage = 25; fireRate = 800; color = 0x32CD32;
+                weaponName = "生化毒气喷射器"; damage = 25; fireRate = 800; color = 0x32CD32; type = "gas";
             } else if (counts.desert >= 2) {
-                weaponName = "贫铀穿甲弹"; damage = 80; fireRate = 1000; color = 0xFFD700;
+                weaponName = "贫铀穿甲弹"; damage = 80; fireRate = 1000; color = 0xFFD700; type = "pierce";
             } else {
-                weaponName = "外交辞令"; damage = 5; fireRate = 200; color = 0xcccccc;
+                weaponName = "外交辞令"; damage = 5; fireRate = 200; color = 0xcccccc; type = "laser";
             }
 
             msg.innerText = `获得武器: ${weaponName} !`;
@@ -1022,6 +1141,8 @@
             currentWeapon.damage = damage;
             currentWeapon.fireRate = fireRate;
             currentWeapon.color = color;
+            currentWeapon.type = type;
+            updateWeaponModel();
             updateHUD();
             playSound('powerup');
 
@@ -1071,8 +1192,9 @@
             enemies = [];
             for(let i=0; i<CONFIG.enemyCount; i++) spawnEnemy();
 
-            currentWeapon = { name: "标准手枪", damage: 20, fireRate: 400, lastShot: 0, color: 0xffff00, spread: 0.02 };
+            currentWeapon = { name: "标准手枪", type: "laser", damage: 20, fireRate: 400, lastShot: 0, color: 0xffff00, spread: 0.02 };
 
+            updateWeaponModel();
             updateHUD();
             updateInventoryUI();
         }
