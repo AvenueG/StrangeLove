@@ -314,6 +314,7 @@
         let obstacles = [];
         let enemies = [];
         let resources = [];
+        let healthKits = [];
         let particles = [];
         let inventory = [];
 
@@ -432,32 +433,32 @@
 
             const mat = new THREE.MeshLambertMaterial({color: currentWeapon.color});
 
-            if (currentWeapon.type === 'nuke') {
+            if (currentWeapon.type === 'nuke' || currentWeapon.type === 'meteor') {
                 const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5), mat);
                 b1.rotation.x = Math.PI/2;
-                const b2 = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshLambertMaterial({color: 0xff0000}));
+                const b2 = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshLambertMaterial({color: currentWeapon.color}));
                 b2.position.z = -0.3;
                 weaponMesh.add(b1); weaponMesh.add(b2);
-            } else if (currentWeapon.type === 'water') {
+            } else if (currentWeapon.type === 'water' || currentWeapon.type === 'tsunami' || currentWeapon.type === 'steam') {
                 const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.1, 0.6), mat);
                 b1.rotation.x = Math.PI/2;
-                const tank = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.2), new THREE.MeshLambertMaterial({color: 0x0000ff}));
+                const tank = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.2), new THREE.MeshLambertMaterial({color: currentWeapon.color}));
                 tank.position.set(0, 0.1, 0.1);
                 weaponMesh.add(b1); weaponMesh.add(tank);
-            } else if (currentWeapon.type === 'gas') {
+            } else if (currentWeapon.type === 'gas' || currentWeapon.type === 'venom' || currentWeapon.type === 'drain') {
                 const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.4), mat);
-                const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.02, 0.2), new THREE.MeshLambertMaterial({color: 0x00ff00}));
+                const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.02, 0.2), new THREE.MeshLambertMaterial({color: currentWeapon.color}));
                 nozzle.rotation.x = Math.PI/2;
                 nozzle.position.z = -0.25;
                 weaponMesh.add(b1); weaponMesh.add(nozzle);
-            } else if (currentWeapon.type === 'pierce') {
+            } else if (currentWeapon.type === 'pierce' || currentWeapon.type === 'thorn') {
                 const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.7), mat);
                 const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3), new THREE.MeshLambertMaterial({color: 0x111111}));
                 scope.rotation.x = Math.PI/2;
                 scope.position.set(0, 0.1, 0);
                 weaponMesh.add(b1); weaponMesh.add(scope);
             } else {
-                // laser/default
+                // laser/default/rainbow
                 const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.4), mat);
                 weaponMesh.add(b1);
             }
@@ -806,34 +807,63 @@
         }
 
         function createWeaponEffect(start, dir, hitPoint) {
-            if(currentWeapon.type === 'nuke') {
+            if(currentWeapon.type === 'nuke' || currentWeapon.type === 'meteor') {
                 createParticles(hitPoint, 0xffaa00, 50, 0.2);
-                createParticles(hitPoint, 0xff0000, 30, 0.5);
-                applyAoEDamage(hitPoint, 15, currentWeapon.damage);
+                createParticles(hitPoint, currentWeapon.color, 30, 0.5);
+                applyAoEDamage(hitPoint, currentWeapon.type === 'meteor' ? 25 : 15, currentWeapon.damage);
             }
-            else if(currentWeapon.type === 'gas') {
+            else if(currentWeapon.type === 'gas' || currentWeapon.type === 'venom' || currentWeapon.type === 'steam') {
                 // Spawn gas clouds along the path
                 const dist = start.distanceTo(hitPoint);
                 for(let i=0; i<dist; i+=2) {
                     const p = start.clone().add(dir.clone().multiplyScalar(i));
-                    createParticles(p, currentWeapon.color, 2, -0.2);
+                    createParticles(p, currentWeapon.color, currentWeapon.type === 'steam' ? 4 : 2, -0.2);
                 }
-                applyAoEDamage(hitPoint, 8, currentWeapon.damage);
+                applyAoEDamage(hitPoint, currentWeapon.type === 'venom' ? 12 : 8, currentWeapon.damage);
             }
-            else if(currentWeapon.type === 'water') {
+            else if(currentWeapon.type === 'water' || currentWeapon.type === 'tsunami') {
                 // Water splash
-                createParticles(hitPoint, currentWeapon.color, 20, 1.5);
+                createParticles(hitPoint, currentWeapon.color, currentWeapon.type === 'tsunami' ? 60 : 20, 1.5);
                 // Apply small AoE push/damage
-                applyAoEDamage(hitPoint, 5, currentWeapon.damage);
+                applyAoEDamage(hitPoint, currentWeapon.type === 'tsunami' ? 20 : 5, currentWeapon.damage);
+            }
+            else if (currentWeapon.type === 'drain') {
+                const material = new THREE.LineBasicMaterial({ color: currentWeapon.color, linewidth: 2 });
+                const points = [start, hitPoint];
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(geometry, material);
+                scene.add(line);
+                setTimeout(() => { scene.remove(line); }, 100);
+
+                // Heal player based on damage dealt
+                player.hp = Math.min(100, player.hp + 5);
+                updateHUD();
+            }
+            else if (currentWeapon.type === 'rainbow') {
+                const colors = [0xff0000, 0xffa500, 0xffff00, 0x008000, 0x0000ff, 0x4b0082, 0xee82ee];
+                for(let i=0; i<7; i++) {
+                    const mat = new THREE.LineBasicMaterial({ color: colors[i] });
+                    const offset = new THREE.Vector3((Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5);
+                    const pts = [start.clone().add(offset), hitPoint.clone().add(offset)];
+                    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+                    const ln = new THREE.Line(geo, mat);
+                    scene.add(ln);
+                    setTimeout(() => { scene.remove(ln); }, 100);
+                }
             }
             else {
-                // Default piercing or laser line
+                // Default piercing, thorn, or laser line
                 const material = new THREE.LineBasicMaterial({ color: currentWeapon.color, linewidth: currentWeapon.type==='pierce'? 3 : 1 });
                 const points = [start, hitPoint];
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
                 const line = new THREE.Line(geometry, material);
                 scene.add(line);
                 setTimeout(() => { scene.remove(line); }, 100);
+
+                if(currentWeapon.type === 'thorn') {
+                    createParticles(hitPoint, currentWeapon.color, 15, 0.8);
+                    applyAoEDamage(hitPoint, 6, currentWeapon.damage);
+                }
             }
         }
 
@@ -1024,6 +1054,21 @@
                  scene.add(mesh);
                  resources.push({ mesh, type, symbol, life: 600 });
             }
+
+            if(Math.random() < (CONFIG.resourceSpawnRate / 3) && healthKits.length < 5) {
+                const x = (Math.random() - 0.5) * CONFIG.mapSize;
+                const z = (Math.random() - 0.5) * CONFIG.mapSize;
+
+                const group = new THREE.Group();
+                const box = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.8), new THREE.MeshLambertMaterial({color: 0xffffff}));
+                const cross1 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.82), new THREE.MeshBasicMaterial({color: 0xff0000}));
+                const cross2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.82), new THREE.MeshBasicMaterial({color: 0xff0000}));
+                group.add(box); group.add(cross1); group.add(cross2);
+                group.position.set(x, 0.5, z);
+                scene.add(group);
+                healthKits.push({ mesh: group, life: 1000 });
+            }
+
             const pPos = controls.yawObject.position;
             for (let i = resources.length - 1; i >= 0; i--) {
                 const r = resources[i];
@@ -1039,6 +1084,24 @@
                 if (r.life <= 0) {
                     scene.remove(r.mesh);
                     resources.splice(i, 1);
+                }
+            }
+
+            for (let i = healthKits.length - 1; i >= 0; i--) {
+                const kit = healthKits[i];
+                kit.mesh.rotation.y += 0.02;
+                kit.life--;
+                if (pPos.distanceTo(kit.mesh.position) < 2) {
+                    player.hp = Math.min(100, player.hp + 50);
+                    playSound('powerup');
+                    updateHUD();
+                    scene.remove(kit.mesh);
+                    healthKits.splice(i, 1);
+                    continue;
+                }
+                if (kit.life <= 0) {
+                    scene.remove(kit.mesh);
+                    healthKits.splice(i, 1);
                 }
             }
         }
@@ -1125,6 +1188,20 @@
 
             if (counts.wild === 3) {
                 weaponName = "核发射密码"; damage = 1000; fireRate = 2000; color = 0xff00ff; type = "nuke";
+            } else if (counts.water === 3) {
+                weaponName = "全球海啸"; damage = 40; fireRate = 600; color = 0x00BFFF; type = "tsunami";
+            } else if (counts.nature === 3) {
+                weaponName = "荆棘风暴"; damage = 15; fireRate = 150; color = 0x32CD32; type = "thorn";
+            } else if (counts.desert === 3) {
+                weaponName = "陨石坠落"; damage = 150; fireRate = 1500; color = 0xFF4500; type = "meteor";
+            } else if (counts.water === 1 && counts.nature === 1 && counts.desert === 1) {
+                weaponName = "彩虹光束"; damage = 20; fireRate = 50; color = 0xFFFFFF; type = "rainbow";
+            } else if (counts.water >= 1 && counts.nature >= 1) {
+                weaponName = "剧毒沼泽"; damage = 30; fireRate = 700; color = 0x800080; type = "venom";
+            } else if (counts.nature >= 1 && counts.desert >= 1) {
+                weaponName = "生命汲取"; damage = 15; fireRate = 400; color = 0x8B0000; type = "drain";
+            } else if (counts.water >= 1 && counts.desert >= 1) {
+                weaponName = "高压蒸汽"; damage = 20; fireRate = 250; color = 0xFFFAFA; type = "steam";
             } else if (counts.water >= 2) {
                 weaponName = "高压水枪"; damage = 8; fireRate = 100; color = 0x00BFFF; type = "water";
             } else if (counts.nature >= 2) {
@@ -1191,6 +1268,9 @@
             enemies.forEach(e => scene.remove(e.mesh));
             enemies = [];
             for(let i=0; i<CONFIG.enemyCount; i++) spawnEnemy();
+
+            healthKits.forEach(k => scene.remove(k.mesh));
+            healthKits = [];
 
             currentWeapon = { name: "标准手枪", type: "laser", damage: 20, fireRate: 400, lastShot: 0, color: 0xffff00, spread: 0.02 };
 
