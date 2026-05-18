@@ -297,7 +297,7 @@
             playerRunSpeed: 28,
             jumpForce: 15,
             gravity: 40,
-            enemyCount: 8,
+            enemyCount: 3,
             mapSize: 200,
             resourceSpawnRate: 0.02,
             biomeSize: 100 // 每个象限的一半大小
@@ -603,7 +603,7 @@
 
             const speed = player.isRunning ? CONFIG.playerRunSpeed : CONFIG.playerSpeed;
             const direction = new THREE.Vector3();
-            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.z = Number(moveBackward) - Number(moveForward);
             direction.x = Number(moveRight) - Number(moveLeft);
             direction.normalize();
 
@@ -779,7 +779,9 @@
                 mesh: group,
                 hp: 100,
                 speed: 3 + Math.random() * 4,
-                lastShot: 0
+                lastShot: 0,
+                armed: false,
+                inventory: 0
             });
         }
 
@@ -787,25 +789,65 @@
             const pPos = controls.yawObject.position;
             enemies.forEach(enemy => {
                 const ePos = enemy.mesh.position;
-                const dist = pPos.distanceTo(ePos);
-                const dir = new THREE.Vector3().subVectors(pPos, ePos).normalize();
-                if (dist > 10) {
-                    ePos.x += dir.x * enemy.speed * delta;
-                    ePos.z += dir.z * enemy.speed * delta;
+
+                if (!enemy.armed) {
+                    // Unarmed enemies look for resources
+                    let nearestRes = null;
+                    let minDist = Infinity;
+                    resources.forEach(r => {
+                        const d = ePos.distanceTo(r.mesh.position);
+                        if (d < minDist) {
+                            minDist = d;
+                            nearestRes = r;
+                        }
+                    });
+
+                    if (nearestRes) {
+                        const rPos = nearestRes.mesh.position;
+                        const dir = new THREE.Vector3().subVectors(rPos, ePos).normalize();
+                        ePos.x += dir.x * enemy.speed * delta;
+                        ePos.z += dir.z * enemy.speed * delta;
+                        enemy.mesh.lookAt(rPos.x, 0, rPos.z);
+
+                        if (minDist < 2) {
+                            // Pick up resource
+                            enemy.inventory++;
+                            scene.remove(nearestRes.mesh);
+                            resources.splice(resources.indexOf(nearestRes), 1);
+
+                            if (enemy.inventory >= 3) {
+                                enemy.armed = true;
+                            }
+                        }
+                    } else {
+                        // Wander if no resources
+                        enemy.mesh.rotation.y += delta;
+                        ePos.x += Math.sin(enemy.mesh.rotation.y) * enemy.speed * delta;
+                        ePos.z += Math.cos(enemy.mesh.rotation.y) * enemy.speed * delta;
+                    }
+
                 } else {
-                    const strafeDir = new THREE.Vector3(-dir.z, 0, dir.x);
-                    ePos.x += strafeDir.x * enemy.speed * delta;
-                    ePos.z += strafeDir.z * enemy.speed * delta;
-                }
-                enemy.mesh.lookAt(pPos.x, 0, pPos.z);
-                const now = performance.now();
-                if (dist < 40 && now - enemy.lastShot > 1500) {
-                    const shotDir = dir.clone();
-                    shotDir.x += (Math.random()-0.5)*0.3;
-                    shotDir.y += (Math.random()-0.5)*0.3;
-                    createLaserBeam(enemy.mesh.position.clone().add(new THREE.Vector3(0,1.5,0)), shotDir);
-                    if(Math.random() > 0.4) takeDamage(10);
-                    enemy.lastShot = now;
+                    // Armed enemies attack player
+                    const dist = pPos.distanceTo(ePos);
+                    const dir = new THREE.Vector3().subVectors(pPos, ePos).normalize();
+                    if (dist > 10) {
+                        ePos.x += dir.x * enemy.speed * delta;
+                        ePos.z += dir.z * enemy.speed * delta;
+                    } else {
+                        const strafeDir = new THREE.Vector3(-dir.z, 0, dir.x);
+                        ePos.x += strafeDir.x * enemy.speed * delta;
+                        ePos.z += strafeDir.z * enemy.speed * delta;
+                    }
+                    enemy.mesh.lookAt(pPos.x, 0, pPos.z);
+                    const now = performance.now();
+                    if (dist < 40 && now - enemy.lastShot > 1500) {
+                        const shotDir = dir.clone();
+                        shotDir.x += (Math.random()-0.5)*0.3;
+                        shotDir.y += (Math.random()-0.5)*0.3;
+                        createLaserBeam(enemy.mesh.position.clone().add(new THREE.Vector3(0,1.5,0)), shotDir);
+                        if(Math.random() > 0.4) takeDamage(10);
+                        enemy.lastShot = now;
+                    }
                 }
             });
         }
